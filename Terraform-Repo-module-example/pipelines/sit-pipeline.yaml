@@ -1,0 +1,102 @@
+trigger: none
+
+pr:
+  branches:
+    include:
+    - main
+  paths:
+    include:
+    - 'module-project-practice/*'
+pool:
+  # vmImage: 'ubuntu-latest'
+  name: 'ado-201-pool'
+
+variables:
+  - group: sharedservicesaccount
+
+jobs:
+- job: terraform_plan
+  displayName: Terraform Plan
+  steps:
+  - checkout: self
+  - task: TerraformInstaller@0
+    displayName: Install Terraform latest
+  
+  - task: AzureCLI@2
+    displayName: 'Download secret-dev.auto.tfvars file from storage account'
+    inputs:
+      azureSubscription: 'Azure subscription 1(491e1121-c626-46e3-98ba-98f9f0434964)'
+      scriptLocation: 'inlineScript'
+      scriptType: 'bash'
+      inlineScript: |
+        az login --service-principal --username "$(clientIdnpd)" --password "$(clientSecretnpd)" --tenant "$(tenantIdnpd)"
+        az storage blob download --account-name terraformstorpipe --account-key $(es-account-key) --container-name tfvars --name terraform.tfvars --file $(Agent.TempDirectory)/dev.auto.tfvars
+  
+  - task: CopyFiles@2
+    inputs:
+      SourceFolder: '$(Agent.TempDirectory)'
+      Contents: 'auto.tfvars'
+      TargetFolder: '$(System.DefaultWorkingDirectory)/module-project-practice'
+  
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Init'
+    inputs:
+      workingDirectory: '$(System.DefaultWorkingDirectory)/module-project-practice'
+      backendServiceArm: 'terra-storageaccount'
+      backendAzureRmResourceGroupName: '102-RG'
+      backendAzureRmStorageAccountName: 'terraformstorpipe'
+      backendAzureRmContainerName: 'tfvars'
+      backendAzureRmKey: 'dev.tfstate'
+  
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Plan'
+    inputs:
+      workingDirectory: '$(System.DefaultWorkingDirectory)/module-project-practice'
+      command: plan
+      environmentServiceNameAzureRM: '102-RG-SC'
+      commandOptions: '-out=$(System.DefaultWorkingDirectory)/module-project-practice/terraform.tfplan'
+  
+  - task: PublishBuildArtifacts@1
+    displayName: 'Terraform : Publish Plan'
+    inputs:
+      pathToPublish: '$(System.DefaultWorkingDirectory)'
+      artifactName: tfplan
+
+- job: terraform_plan_review
+  displayName: Terraform Plan Review
+  dependsOn: ['terraform_plan']
+  pool: server
+  steps:
+  - task: ManualValidation@0
+    timeoutInMinutes: 10 # task times out in 1 day (1440)
+    inputs:
+        notifyUsers: |
+          jetti.dinesh@gmail.com
+        instructions: 'Please validate the terraform plan and resume'
+        onTimeout: 'reject'
+
+- job: Deploy
+  displayName: Terraform Deploy
+  cancelTimeoutInMinutes: 240
+  dependsOn: ['terraform_plan_review']
+  steps:
+  - task: TerraformInstaller@0
+    displayName: Install Terraform latest
+  - download: current
+    artifact: tfplan
+
+  - task: CmdLine@2
+    displayName: 'Terraform : Init Upgrade'
+    inputs:
+      workingDirectory: '$(Pipeline.Workspace)/tfplan/module-project-practice'
+      script: |
+          chmod -R a+x .terraform
+
+
+  - task: TerraformTaskV2@2
+    displayName: 'Terraform : Validate and Apply'
+    inputs:
+      command: apply
+      environmentServiceNameAzureRM: '102-RG-SC'
+      workingDirectory: '$(Pipeline.Workspace)/tfplan/module-project-practice'
+      commandOptions: 'terraform.tfplan'

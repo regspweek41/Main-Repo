@@ -1,0 +1,12 @@
+subnetname             = "add_subnet"
+rgname                 = "8pmbatch-RG"
+nertworkname           = "8pmbatch-vent"
+address                = ["10.5.3.0/24"]
+dbname                 = "postgres-4578"
+location               = "UK South"
+administrator_login    = "zpadmin"
+administrator_password = "Je32WERTE!!"
+zone                   = "1"
+storage_mb             = "32768"
+sku_name               = "GP_Standard_D4s_v3"
+dnsname                = "exmples1.postgres.database.azure.com"
